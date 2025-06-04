@@ -1,221 +1,383 @@
 const qrcode = require('qrcode-terminal');
-const { Client, Buttons, List, MessageMedia } = require('whatsapp-web.js');
-const client = new Client();
+const { Client, Buttons, List, MessageMedia, LocalAuth } = require('whatsapp-web.js');
+const path = require('path');
+
+const client = new Client({
+    authStrategy: new LocalAuth({ clientId: 'ij-delivery-bot' }),
+    puppeteer: {
+        executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    }
+});
 
 client.on('qr', qr => {
+    console.clear();
     qrcode.generate(qr, { small: true });
+    console.log('\nEscaneie o QR code acima para autenticar no WhatsApp.');
 });
+
 client.on('ready', () => {
-    console.log('Tudo certo! WhatsApp conectado.');
+    console.log('✅ Bot conectado ao WhatsApp com sucesso!');
 });
+
+client.on('auth_failure', msg => {
+    console.error('❌ Falha na autenticação', msg);
+});
+
+client.on('disconnected', reason => {
+    console.warn('⚠️ Cliente desconectado!', reason);
+});
+
 client.initialize();
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 let aguardandoSenha = {};
 
-// GATILHOS
 const GATILHO_SAUDACAO = /^(oi|olá|ola|bom dia|boa tarde|boa noite)$/i;
-const OPC_REVENDEDOR = '1';
-const OPC_CADASTRO = '2';
-const OPC_CLIENTE = '3';
-
-const OPC_PEDIDO = '1';
-const OPC_SACOLINHA = '3';
-const OPC_BOLSA = '4';
-const OPC_RASTREIO = '5';
-const OPC_SUPORTE = '6';
-const OPC_SAIR = '7';
-
-const OPC_SENHA_INFO = '1';
-const OPC_SENHA_TENTAR = '2';
-const OPC_SENHA_MENU = '3';
-
-const SENHA_CORRETA = '123456';
-
+const precosFrete = {
+    "bom será": 3,
+    "licurizal": 3,
+    "buraco d’água": 3,
+    "lagoa velha": 5,
+    "gazai": 5,
+    "baixa da ema": 5,
+    "batista": 7,
+    "ipoeira": 7,
+    "pedra azul": 7,
+    "pindura saia": 10,
+    "roma": 10,
+    "araticum": 12,
+    "quatro estradas": 15,
+    "ponto": 15,
+    "cabeça do boi": 15
+};
+const VALOR_ACAI = 10.00;
+const TAXA_DEBITO = 1.43;
+const TAXA_CREDITO = 3.38;
 client.on('message', async msg => {
     const chat = await msg.getChat();
 
-    // 1. Saudação inicial
     if (msg.body.match(GATILHO_SAUDACAO)) {
-        const contact = await msg.getContact();
-        const name = contact.pushname;
         await chat.sendStateTyping();
         await client.sendMessage(msg.from,
-            `Olá, ${name ? name.split(" ")[0] : ""}! 👋\n\n` +
-            `Como podemos te ajudar hoje?\nEscolha uma das opções abaixo:\n\n` +
-            `1 - Sou revendedor\n2 - Concluir cadastro\n3 - Sou cliente`
+            'Olá 😄 Tudo bem?\Que bom te ver por aqui! Sou o robô assistente da IJ Delivery ,e irei agilizar seu pedido.'
         );
-        return;
-    }
-
-    // 2. Concluir cadastro
-    if (msg.body === OPC_CADASTRO && msg.from.endsWith('@c.us')) {
+        await delay(1500);
         await chat.sendStateTyping();
-        await client.sendMessage(msg.from, 'Vamos concluir seu cadastro! Por favor, informe seu nome completo e CPF para prosseguirmos.');
+        await client.sendMessage(msg.from, 'Para continuarmos, *me informa só seu nome* por favor?');
+        aguardandoSenha[msg.from] = 'esperandoNome';
         return;
     }
 
-    // 3. Sou cliente
-    if (msg.body === OPC_CLIENTE && !aguardandoSenha[msg.from] && msg.from.endsWith('@c.us')) {
+    if (aguardandoSenha[msg.from] === 'esperandoNome') {
+        const nome = msg.body.trim();
         await chat.sendStateTyping();
-        await client.sendMessage(msg.from, 'Olá, cliente! 😊 Em que posso te ajudar hoje? Digite sua dúvida ou solicitação.');
-        return;
-    }
+        await client.sendMessage(msg.from, `Perfeito, ${nome}! 👏`);
+        await delay(1500);
 
-    // 4. Escolheu "Sou revendedor"
-    if (msg.body === OPC_REVENDEDOR && !aguardandoSenha[msg.from]) {
-        aguardandoSenha[msg.from] = 'esperandoSenha';
+        const imagePath = path.join(__dirname, 'img', 'cardapio.jpg');
+        const cardapio = MessageMedia.fromFilePath(imagePath);
+
         await chat.sendStateTyping();
-        await client.sendMessage(msg.from, 'Por favor, informe a sua senha de acesso.\nÉ aquela que enviamos para o seu e-mail. 🔐');
+        await client.sendMessage(msg.from, cardapio, {
+            // caption: '📋 *Cardápio Atualizado!*\nEscolha sua pizza ou açaí preferido 😋'
+        });
+
+        await delay(1500);
+        await chat.sendStateTyping();
+        await client.sendMessage(msg.from,
+            `Qual seu pedido hoje, ${nome}? 😊\n\n*PIZZA 🍕*\n*AÇAÍ 🍧*`
+        );
+
+        aguardandoSenha[msg.from] = { etapa: 'aguardandoPedido', nome };
         return;
     }
 
-    // 5. Verifica senha
-    if (aguardandoSenha[msg.from] === 'esperandoSenha') {
-        if (msg.body === SENHA_CORRETA) {
-            aguardandoSenha[msg.from] = 'menuRevendedor';
-            await chat.sendStateTyping();
-            await client.sendMessage(msg.from, 'Senha correta! ✅ Seja bem-vindo à área de revendedores!');
-            await client.sendMessage(msg.from,
-                '(audio) Olá, tudo bem? 😊\n' +
-                'Pra agilizar seu atendimento, é só digitar o número da opção desejada.\n\n' +
-                '1 - Fazer pedido\n' +
-                '3 - Repor sacolinhas Rede Revitta\n' +
-                '4 - Comprar Bolsa Rede Revitta\n' +
-                '5 - Rastrear pedido do cliente\n' +
-                '6 - Suporte\n' +
-                '7 - Sair'
-            );
-        } else {
-            aguardandoSenha[msg.from] = 'senhaIncorreta';
-            await chat.sendStateTyping();
-            await client.sendMessage(msg.from,
-                'Senha incorreta. 😕 Mas calma, estamos aqui pra te ajudar!\n\n' +
-                'Escolha uma das opções abaixo:\n' +
-                '1 - Onde encontro minha senha?\n' +
-                '2 - Tentar novamente\n' +
-                '3 - Voltar ao menu principal'
-            );
-        }
-        return;
-    }
+    const dados = aguardandoSenha[msg.from];
+    if (!dados || !dados.etapa) return;
 
-    // 6. Tratamento para senha incorreta
-    if (aguardandoSenha[msg.from] === 'senhaIncorreta') {
-        if (msg.body === OPC_SENHA_INFO) {
-            await chat.sendStateTyping();
-            await client.sendMessage(msg.from, 'Você pode encontrar sua senha no e-mail que enviamos no momento do seu cadastro. 📨');
-        } else if (msg.body === OPC_SENHA_TENTAR) {
-            aguardandoSenha[msg.from] = 'esperandoSenha';
-            await chat.sendStateTyping();
-            await client.sendMessage(msg.from, 'Sem problemas! 😊 Digite sua senha novamente.');
-        } else if (msg.body === OPC_SENHA_MENU) {
-            delete aguardandoSenha[msg.from];
-            const contact = await msg.getContact();
-            const name = contact.pushname;
-            await chat.sendStateTyping();
-            await client.sendMessage(msg.from,
-                `Olá, ${name ? name.split(" ")[0] : ""}! 👋\n\n` +
-                `Como podemos te ajudar hoje?\nEscolha uma das opções abaixo:\n\n` +
-                `1 - Sou revendedor\n2 - Concluir cadastro\n3 - Sou cliente`
-            );
-        }
-        return;
-    }
-
-    // 7. Menu do revendedor (após senha correta)
-    if (aguardandoSenha[msg.from] === 'menuRevendedor') {
-        switch (msg.body) {
-            case OPC_PEDIDO:
-                aguardandoSenha[msg.from] = 'pedidoProduto';
+    switch (dados.etapa) {
+        case 'aguardandoPedido': {
+            const pedido = msg.body.trim().toLowerCase();
+            if (pedido.includes('pizza')) {
                 await chat.sendStateTyping();
-                await client.sendMessage(msg.from,
-                    'Qual produto você gostaria de fazer o pedido hoje? 😊\n\n' +
-                    '1 - ozenvita\n' +
-                    '2 - diurie fit\n' +
-                    '3 - lift detox\n' +
-                    '4 - slim gota\n' +
-                    '5 - colagen vitta\n' +
-                    '6 - nutraflit\n' +
-                    '7 - visara\n' +
-                    '8 - hidra liso\n' +
-                    '9 - lizzante\n' +
-                    '10 - fignar\n' +
-                    '11 - curcumy\n' +
-                    '12 - nutravida\n' +
-                    '0 - voltar ao menu anterior'
-                );
-                break;
-
-            case OPC_SACOLINHA:
-                await chat.sendStateTyping();
-                await client.sendMessage(msg.from, 'Beleza! Vamos repor as sacolinhas Rede Revitta. Quantas você precisa? 🎒');
-                break;
-            case OPC_BOLSA:
-                await chat.sendStateTyping();
-                await client.sendMessage(msg.from, 'Legal! Qual modelo de Bolsa Rede Revitta você deseja comprar? 👜');
-                break;
-            case OPC_RASTREIO:
-                await chat.sendStateTyping();
-                await client.sendMessage(msg.from, 'Certo! Me informe o número do pedido do cliente para rastrear. 🔍');
-                break;
-            case OPC_SUPORTE:
-                await chat.sendStateTyping();
-                await client.sendMessage(msg.from, 'Estamos aqui pra te ajudar! Qual é a sua dúvida ou problema? 🛠️');
-                break;
-            case OPC_SAIR:
-                await chat.sendStateTyping();
-                await client.sendMessage(msg.from, 'Ok! Encerramos seu atendimento. Quando precisar, é só chamar. 👋');
+                await client.sendMessage(msg.from, `🍕 Vamos montar sua pizza, ${dados.nome}!`);
                 delete aguardandoSenha[msg.from];
-                break;
-            default:
+            } else if (pedido.includes('açaí') || pedido.includes('acai')) {
                 await chat.sendStateTyping();
-                await client.sendMessage(msg.from, 'Opção inválida. Por favor, digite um número entre 1 e 7. 😉');
+                await client.sendMessage(msg.from, `🍧 Vamos montar seu açaí, ${dados.nome}!`);
+                await client.sendMessage(msg.from,
+                    'Qual açaí você gosta mais?\n\n' +
+                    '🍧 *Açaí Tradicional*\n' +
+                    '🍓 *Açaí de Morango*\n' +
+                    '🍌 *Açaí de Banana*'
+                );
+                dados.etapa = 'aguardandoSaborAcai';
+                dados.comanda = {};
+            } else {
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from, '❌ Opção inválida. Digite apenas *PIZZA* ou *AÇAÍ*.');
+            }
+            break;
         }
-        return;
-    }
-
-    if (aguardandoSenha[msg.from] === 'pedidoProduto') {
-        let produto = '';
-    
-        switch (msg.body) {
-            case '1': produto = 'Ozenvita'; break;
-            case '2': produto = 'Diurie Fit'; break;
-            case '3': produto = 'Lift Detox'; break;
-            case '4': produto = 'Slim Gota'; break;
-            case '5': produto = 'Colagen Vitta'; break;
-            case '6': produto = 'Nutraflit'; break;
-            case '7': produto = 'Visara'; break;
-            case '8': produto = 'Hidra Liso'; break;
-            case '9': produto = 'Lizzante'; break;
-            case '10': produto = 'Fignar'; break;
-            case '11': produto = 'Curcumy'; break;
-            case '12': produto = 'Nutravida'; break;
-            case '0':
-                aguardandoSenha[msg.from] = 'menuRevendedor';
+        case 'aguardandoSaborAcai': {
+            const sabor = msg.body.trim();
+            dados.comanda.saborAcai = sabor;
+            dados.etapa = 'aguardandoAdicionais';
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from,
+                'Agora vamos para os adicionais?\n\n' +
+                '✅ Você pode escolher até *3 adicionais* que são de cortesia.\n' +
+                '⚠️ Caso prefira mais adicionais, é cobrado apenas *R$1,50 por adicional extra*.'
+            );
+            await client.sendMessage(msg.from,
+                'Digite os adicionais separados por vírgula:\n\n' +
+                '• Leite em Pó\n' +
+                '• MMs\n' +
+                '• Calda de Morango\n' +
+                '• Calda de Chocolate\n' +
+                '• Granola\n' +
+                '• Leite Condensado\n' +
+                '• Granulado Colorido\n' +
+                '• Granulado de Chocolate\n' +
+                '• Coco Ralado'
+            );            
+            break;
+        }
+        case 'aguardandoAdicionais': {
+            const adicionais = msg.body.split(',').map(a => a.trim()).filter(a => a);
+            dados.comanda.adicionaisSelecionados = adicionais;
+        
+            if (adicionais.length > 3) {
+                const extras = adicionais.slice(3);
+                const custo = extras.length * 1.5;
+        
                 await chat.sendStateTyping();
                 await client.sendMessage(msg.from,
-                    'Você voltou ao menu anterior. Escolha uma das opções:\n\n' +
-                    '1 - Fazer pedido\n' +
-                    '3 - Repor sacolinhas Rede Revitta\n' +
-                    '4 - Comprar Bolsa Rede Revitta\n' +
-                    '5 - Rastrear pedido do cliente\n' +
-                    '6 - Suporte\n' +
-                    '7 - Sair'
+                    `⚠️ Você escolheu mais de 3 adicionais.\n` +
+                    `Será cobrado *R$1,50* por adicional extra.\n\n` +
+                    `💰 Total de adicionais pagos: *${extras.length} x R$1,50 = R$ ${custo.toFixed(2)}*\n\n` +
+                    `Deseja manter esses adicionais?\n*Responda: SIM ou NÃO*`
                 );
-                return;
-    
-            default:
+        
+                dados.etapa = 'confirmarAdicionaisPagos';
+            } else {
+                dados.comanda.adicionais = adicionais;
+                dados.comanda.valorExtras = 0;
+                dados.etapa = 'perguntarOutroAcai';
+        
                 await chat.sendStateTyping();
-                await client.sendMessage(msg.from, 'Opção inválida. Por favor, escolha um número de 1 a 12 ou digite 0 para voltar ao menu anterior.');
-                return;
+                await client.sendMessage(msg.from, '❓ Deseja montar outro açaí?\n*Responda: SIM ou NÃO*');
+            }
+            break;
         }
-    
-        await chat.sendStateTyping();
-        await client.sendMessage(msg.from, `Pedido registrado para o produto *${produto}* ✅\nNosso time vai confirmar com você em breve!`);
-    
-        // volta pro menu revendedor
-        aguardandoSenha[msg.from] = 'menuRevendedor';
-        return;
+        
+        case 'confirmarAdicionaisPagos': {
+            const resposta = msg.body.trim().toLowerCase();
+            const adicionais = dados.comanda.adicionaisSelecionados;
+            if (resposta === 'sim') {
+                const extras = adicionais.slice(3);
+                const custo = extras.length * 1.5;
+                dados.comanda.adicionais = adicionais;
+                dados.comanda.valorExtras = custo;
+            } else {
+                dados.comanda.adicionais = adicionais.slice(0, 3);
+                dados.comanda.valorExtras = 0;
+            }
+            dados.etapa = 'perguntarOutroAcai';
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from, '❓ Deseja montar outro açaí?\n*Responda: SIM ou NÃO*');
+            // if (!dados.comanda.listaAcais) dados.comanda.listaAcais = [];
+            //     dados.comanda.listaAcais.push({
+            //         sabor: dados.comanda.saborAcai,
+            //         adicionais: dados.comanda.adicionais,
+            //         valorExtras: dados.comanda.valorExtras
+            //     });
+
+            break;
+        }
+        
+        case 'aguardandoLocalidade': {
+            const localidade = msg.body.trim();
+            dados.comanda.localidade = localidade;
+            dados.comanda.valorFrete = precosFrete[localidade.toLowerCase()] || 0;
+        
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from,
+                '📌 Perfeito. Poderia me enviar a *localização atual* e me informar o *endereço direitinho* por favor?'
+            );
+        
+            dados.etapa = 'aguardandoEndereco';
+            break;
+        }
+        case 'aguardandoEndereco': {
+            const endereco = msg.body.trim();
+            dados.comanda.enderecoTexto = endereco;
+        
+            dados.etapa = 'formaPagamento';
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from,
+                '💳 Como prefere pagar?\n\n1️⃣ Cartão (crédito/débito)\n2️⃣ Dinheiro (levar troco para quanto?)\n3️⃣ Pix'
+            );            
+            break;
+        }        
+        case 'perguntarOutroAcai': {
+            const resposta = msg.body.trim().toLowerCase();
+            if (!dados.comanda.listaAcais) dados.comanda.listaAcais = [];
+        
+            dados.comanda.listaAcais.push({
+                sabor: dados.comanda.saborAcai,
+                adicionais: dados.comanda.adicionais,
+                valorExtras: dados.comanda.valorExtras
+            });
+        
+            if (resposta === 'sim') {
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from,
+                    '🍧 Vamos montar mais um açaí!\nQual sabor você deseja?\n- Açaí Tradicional\n- Açaí de Morango\n- Açaí de Banana'
+                );
+                dados.etapa = 'aguardandoSaborAcai';
+                delete dados.comanda.saborAcai;
+                delete dados.comanda.adicionais;
+                delete dados.comanda.valorExtras;
+                delete dados.comanda.adicionaisSelecionados;
+            } else {
+                dados.etapa = 'aguardandoFrete';
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from,
+                    '🚚 Antes de finalizar, escolha sua *localidade* para calcularmos o frete:\n\n' +
+                    '📍 *3 reais:* bom será, licurizal, buraco d’água\n' +
+                    '📍 *5 reais:* lagoa velha, gazai, baixa da ema\n' +
+                    '📍 *7 reais:* batista, ipoeira, pedra azul\n' +
+                    '📍 *10 reais:* pindura saia, roma\n' +
+                    '📍 *12 reais:* araticum\n' +
+                    '📍 *15 reais:* quatro estradas, ponto, cabeça do boi\n\n' +
+                    '✏️ Digite o nome da sua localidade abaixo ⬇️'
+                );
+            }
+            break;
+        }
+
+        case 'aguardandoFrete': {
+            const localidade = msg.body.trim();
+            dados.comanda.localidade = localidade;
+            dados.comanda.valorFrete = precosFrete[localidade.toLowerCase()] || 0;
+        
+            dados.etapa = 'aguardandoEndereco';
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from,
+                '📌 Perfeito. Poderia me enviar a *localização atual* e me informar o *endereço direitinho* por favor?'
+            );
+            break;
+        }
+
+        case 'formaPagamento': {
+            const forma = msg.body.trim().toLowerCase();
+            if (forma.includes('cartao') || forma === '1' || forma.includes('cartão')) {
+                dados.etapa = 'tipoCartao';
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from, '📌 No cartão tem uma pequena taxa da maquininha, ok?');
+                await delay(1000);
+                await client.sendMessage(msg.from, 'Me confirma uma coisa. Vai ser no *Crédito* ou *Débito*?');
+            } else if (forma.includes('dinheiro') || forma === '2') {
+                dados.etapa = 'trocoDinheiro';
+                await client.sendMessage(msg.from, '💵 Certo! Precisa de troco pra quanto?');
+            } else if (forma.includes('pix') || forma === '3') {
+                dados.comanda.pagamento = 'Pix';
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from, '📲 Chave Pix:\n*75974003081*\n*Iran Lima Silva*');
+            
+                dados.etapa = 'resumoFinal';
+                client.emit('message', msg); // forçar envio do resumo
+            } else {
+                await client.sendMessage(msg.from, '❌ Opção inválida. Escolha:\n1️⃣ Cartão\n2️⃣ Dinheiro\n3️⃣ Pix');
+            }
+            break;
+        }
+        
+        case 'tipoCartao': {
+            const tipo = msg.body.trim().toLowerCase();
+            const somaExtras = dados.comanda.listaAcais.reduce((acc, item) => acc + item.valorExtras, 0);
+            const valorComFrete = somaExtras + dados.comanda.valorFrete;
+        
+            if (tipo.includes('débito') || tipo.includes('debito')) {
+                const taxa = valorComFrete * (TAXA_DEBITO / 100);
+                dados.comanda.pagamento = 'Cartão (Débito)';
+                dados.comanda.taxaCartao = taxa;
+            } else if (tipo.includes('crédito') || tipo.includes('credito')) {
+                const taxa = valorComFrete * (TAXA_CREDITO / 100);
+                dados.comanda.pagamento = 'Cartão (Crédito)';
+                dados.comanda.taxaCartao = taxa;
+            } else {
+                await client.sendMessage(msg.from, '❌ Por favor, diga se é *Crédito* ou *Débito*.');
+                return;
+            }
+        
+            dados.etapa = 'resumoFinal';
+            client.emit('message', msg);
+            break;
+        }
+        
+        case 'trocoDinheiro': {
+            const valor = msg.body.trim();
+            dados.comanda.pagamento = `Dinheiro - Troco para R$ ${valor}`;
+            dados.etapa = 'resumoFinal';
+            client.emit('message', msg);
+            break;
+        }
+        
+        case 'resumoFinal': {
+            const now = new Date();
+            const dia = now.toLocaleDateString('pt-BR');
+            const hora = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        
+            let resumo = `⭐ *RESUMO DE PEDIDO* ⭐\n\n`;
+            resumo += `*Nome:* ${dados.nome}\n\n`;
+            resumo += `*Pedido:*\n`;
+        
+            let totalExtras = 0;
+            dados.comanda.listaAcais.forEach((item, i) => {
+                resumo += `${i + 1}. AÇAÍ - ${item.sabor}\n   ➕ Adicionais: ${item.adicionais.join(', ')}\n`;
+                totalExtras += item.valorExtras;
+                if (item.valorExtras > 0) {
+                    resumo += `   💰 Adicionais pagos: R$ ${item.valorExtras.toFixed(2)}\n`;
+                }
+            });
+        
+            const frete = dados.comanda.valorFrete || 0;
+            const taxa = dados.comanda.taxaCartao || 0;
+            const valorAcais = dados.comanda.listaAcais.length * VALOR_ACAI;
+            const total = valorAcais + totalExtras + frete + taxa;
+        
+            resumo += `${dados.comanda.listaAcais.length + 1}. FRETE R$ ${frete.toFixed(2)}\n`;
+            resumo += `---------------------------\n\n`;
+        
+            resumo += `*Valor Total a pagar:* R$ ${total.toFixed(2)}\n`;
+            resumo += `====================\n\n`;
+        
+            resumo += `🛵 *Com Entrega*\n`;
+            resumo += `===== *Endereço* =====\n`;
+            resumo += `${dados.comanda.localidade}, ${dados.comanda.enderecoTexto}\n`;
+            resumo += `====================\n\n`;
+        
+            resumo += `💳 *Forma de Pagamento:* ${dados.comanda.pagamento || 'Não informado'}\n`;
+            if (dados.comanda.pagamento?.toLowerCase().includes('troco')) {
+                const match = dados.comanda.pagamento.match(/R\$\s?\d+(?:,\d{2})?/);
+                if (match) resumo += `💲 *Levar Troco Pra:* ${match[0]}\n`;
+            }
+        
+            resumo += `\n---------------------------\n`;
+            resumo += `*Pedido realizado em:*\n${dia} | ${hora}\n\n`;
+            resumo += `😊 *Agradecemos a Preferência!!*`;
+        
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from, resumo);
+            delete aguardandoSenha[msg.from];
+            break;
+        }
+        
+        
+        
     }
 });
