@@ -35,27 +35,55 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 let aguardandoSenha = {};
 
 const GATILHO_SAUDACAO = /^(oi|olá|ola|bom dia|boa tarde|boa noite)$/i;
-const precosFrete = {
-    "bom será": 3,
-    "licurizal": 3,
-    "buraco d’água": 3,
-    "lagoa velha": 5,
-    "gazai": 5,
-    "baixa da ema": 5,
-    "batista": 7,
-    "ipoeira": 7,
-    "pedra azul": 7,
-    "pindura saia": 10,
-    "roma": 10,
-    "araticum": 12,
-    "quatro estradas": 15,
-    "ponto": 15,
-    "cabeça do boi": 15
-};
-const VALOR_ACAI = 10.00;
+const precosFrete = {"bom sera": 3, "bom será": 3,"licurizal": 3,"buraco dagua": 3,"buraco d’água": 3,"lagoa velha": 5,"gazai": 5,"baixa da ema": 5,"batista": 7,"ipoeira": 7,"pedra azul": 7,"pindura saia": 10,"roma": 10,"araticum": 12,"quatro estradas": 15,"ponto": 15,"cabeça do boi": 15};
+const VALOR_ACAI = 15.00;
 const TAXA_DEBITO = 1.43;
 const TAXA_CREDITO = 3.38;
+const controleRespostas = {}; 
+const TEMPO_ESPERA_MS = 90 * 60 * 1000; 
+
 client.on('message', async msg => {
+    // Verificação de horário de funcionamento
+    // const agora = new Date();
+    // const diaSemana = agora.getDay(); // 0 = Domingo, 1 = Segunda ... 6 = Sábado
+    // const hora = agora.getHours();
+    // const minuto = agora.getMinutes();
+
+    // const horaDecimal = hora + minuto / 60;
+
+    // let horarioValido = false;
+
+    // if ([4, 5, 6].includes(diaSemana)) {
+    //     // Quinta (4), Sexta (5), Sábado (6) → 18:30 até 22:00
+    //     if (horaDecimal >= 18.5 && horaDecimal <= 22) horarioValido = true;
+    // } else if ([0, 1, 2].includes(diaSemana)) {
+    //     // Domingo (0), Segunda (1), Terça (2) → 18:30 até 21:00
+    //     if (horaDecimal >= 18.5 && horaDecimal <= 21) horarioValido = true;
+    // } else if (diaSemana === 3) {
+    //     // Quarta-feira (3) → fechado
+    //     horarioValido = false;
+    // }
+
+    // if (!horarioValido) {
+    //     await client.sendMessage(msg.from,
+    //         '⚠️ *Olá!*\nA pizzaria não está funcionando neste horário.\n\n🕒 *Horários de atendimento:*\n' +
+    //         '📅 *Dom, Seg, Ter:* 18:30 às 21:00\n' +
+    //         '📅 *Quarta-feira:* Fechado\n' +
+    //         '📅 *Qui, Sex, Sáb:* 18:30 às 22:00\n\nTe espero no horário certo pra fazer seu pedido! 🍕😊' 
+    //     );
+    //     return; // Interrompe o fluxo para não continuar com o atendimento
+    // }
+    // const agora = Date.now();
+    // const ultimoAtendimento = controleRespostas[msg.from] || 0;
+
+    // if (agora - ultimoAtendimento < TEMPO_ESPERA_MS) {
+    //     // Silencia a resposta se ainda não passou 1h30
+    //     return;
+    // }
+
+
+
+
     const chat = await msg.getChat();
 
     if (msg.body.match(GATILHO_SAUDACAO)) {
@@ -102,8 +130,16 @@ client.on('message', async msg => {
             const pedido = msg.body.trim().toLowerCase();
             if (pedido.includes('pizza')) {
                 await chat.sendStateTyping();
-                await client.sendMessage(msg.from, `🍕 Vamos montar sua pizza, ${dados.nome}!`);
-                delete aguardandoSenha[msg.from];
+                await client.sendMessage(msg.from,
+                    `🍕 *Vamos montar seu pedido, ${dados.nome}?* 😁\n\n` +
+                    `Pode me dizer, qual o tamanho da pizza você quer?\n`+
+                    `🧀 *Grande (8 fatias)* - R$ 40,00\n`+
+                    `🍕 *Média (6 fatias)* - R$ 35,00\n`+
+                    `🌟 *Borda recheada (8 fatias)* - R$ 48,00`
+                    );
+                dados.etapa = 'aguardandoTamanhoPizza';
+                dados.comanda = {};
+
             } else if (pedido.includes('açaí') || pedido.includes('acai')) {
                 await chat.sendStateTyping();
                 await client.sendMessage(msg.from, `🍧 Vamos montar seu açaí, ${dados.nome}!`);
@@ -121,6 +157,186 @@ client.on('message', async msg => {
             }
             break;
         }
+
+        case 'aguardandoTamanhoPizza': {
+            const tamanho = msg.body.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            let precoPizza = 0;
+        
+            if (tamanho.includes('media')) {
+                dados.comanda.tamanhoPizza = 'Média';
+                precoPizza = 35;
+            } else if (tamanho.includes('grande')) {
+                dados.comanda.tamanhoPizza = 'Grande';
+                precoPizza = 40;
+            } else if (tamanho.includes('borda')) {
+                dados.comanda.tamanhoPizza = 'Borda Recheada';
+                precoPizza = 48;
+                dados.etapa = 'aguardandoSaborBorda'; // <- esse continua separado
+                break;
+            } else {
+                await client.sendMessage(msg.from, '❌ Tamanho inválido. Digite *Média*, *Grande* ou *Borda Recheada*.');
+                return;
+            }
+        
+            dados.comanda.valorPizza = precoPizza;
+        
+            // ✅ Etapa correta para esperar sabores
+            dados.etapa = 'aguardandoSaboresSelecionados';
+        
+            const saboresTexto = `Pronto, perfeito! Agora, qual sabores você prefere?\nLembrando, você pode escolher 2 sabores\n\n` +
+                `- MUSSARELA\n` +
+                `- 2 QUEIJOS\n` +
+                `- 3 QUEIJOS\n` +
+                `- MISTA\n` +
+                `- MILHO VERDE\n` +
+                `- CALABRESA\n` +
+                `- CALABRESA COM CATUPIRY\n` +
+                `- CALABRESA COM CHEDDAR\n` +
+                `- CALABRESUNTO\n` +
+                `- CALABRESA COM MILHO\n` +
+                `- APIMENTADA\n` +
+                `- FRANGO COM CATUPIRY\n` +
+                `- FRANGO COM CHEDDAR\n` +
+                `- CAIPIRA`;
+        
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from, saboresTexto);
+        
+            break;
+        }
+        
+
+        case 'aguardandoSaboresSelecionados': {
+            const sabores = msg.body.split(',').map(s => s.trim().toUpperCase());
+        
+            if (sabores.length > 2) {
+                await client.sendMessage(msg.from, '⚠️ Você só pode escolher *2 sabores*. Por favor, envie novamente.');
+                return;
+            }
+        
+            dados.comanda.saboresPizza = sabores;
+            dados.etapa = 'perguntarMaisPizzaOuAcai';
+        
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from,
+                'Muito bom! Você deseja adicionar outra pizza ou açaí?\n\n*SIM*\n*NÃO*'
+            );
+            break;
+        }
+
+        case 'perguntarObservacao': {
+            const resposta = msg.body.trim().toLowerCase();
+        
+            if (resposta === 'sim') {
+                dados.etapa = 'aguardandoTextoObservacao';
+                await client.sendMessage(msg.from, '✍️ Pode digitar sua observação que vou anotar aqui...');
+            } else if (resposta === 'não' || resposta === 'nao') {
+                dados.comanda.observacao = null;
+                dados.etapa = 'perguntarBebida';
+        
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from,
+                    'Beleza! Vai querer algo para beber?\n\nTemos:\n' +
+                    '- Refri Goob Guaraná 2L - 8,00\n' +
+                    '- Refri Goob Cola 2L - 8,00\n' +
+                    '- Refri Goob Guaraná 1L - 5,00\n' +
+                    '- Não quero nada para beber'
+                );
+            } else {
+                await client.sendMessage(msg.from, '❌ Por favor, responda apenas *SIM* ou *NÃO*.');
+            }
+        
+            break;
+        }
+
+        case 'aguardandoTextoObservacao': {
+            const obs = msg.body.trim();
+            dados.comanda.observacao = obs;
+        
+            dados.etapa = 'perguntarBebida';
+        
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from,
+                'Beleza! Vai querer algo para beber?\n\nTemos:\n' +
+                '- Refri Goob Guaraná 2L - 8,00\n' +
+                '- Refri Goob Cola 2L - 8,00\n' +
+                '- Refri Goob Guaraná 1L - 5,00\n' +
+                '- Não quero nada para beber'
+            );
+        
+            break;
+        }
+
+        
+        case 'perguntarBebida': {
+            const bebida = msg.body.trim();
+            dados.comanda.bebida = bebida;
+        
+            dados.etapa = 'aguardandoLocalidade'; // <- Atualiza etapa corretamente
+        
+            // 1. Pergunta a região
+            await chat.sendStateTyping();
+            await client.sendMessage(msg.from,
+                '📍 *Maravilha!* Me informa qual o nome da sua região para calcular o frete:\n\n' +
+                '- Bom Será\n' +
+                '- Licurizal\n' +
+                '- Buraco d´Agua\n' +
+                '- Lagoa Velha\n' +
+                '- Gazai\n' +
+                '- Baixa da Ema\n' +
+                '- Batista\n' +
+                '- Ipoeira\n' +
+                '- Pindura Saia\n' +
+                '- Roma\n' +
+                '- Araticum\n' +
+                '- Quatro Estradas\n' +
+                '- Cabeça do Boi\n' +
+                '- Ponto\n\n' +
+                '📝 *-Prefiro fazer retirada?*\n' +
+                '📝 *-Outra Região?Qual?:*'
+            );
+        
+            break; // para aqui! só vai pro endereço no próximo case
+        }
+              
+        
+
+        case 'perguntarMaisPizzaOuAcai': {
+            const resposta = msg.body.trim().toLowerCase();
+        
+            if (resposta === 'sim') {
+                dados.etapa = 'aguardandoPedido';
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from, '😄 Vamos lá! O que você deseja adicionar agora?\n*PIZZA* ou *AÇAÍ*?');
+            } else if (resposta === 'não' || resposta === 'nao') {
+                dados.etapa = 'perguntarObservacao';
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from,
+                    'Tem alguma observação?\n\n(Exemplo: frango sem catupiry, apimentada com pouca pimenta...)\n\n*Responda: SIM ou NÃO*'
+                );
+            } else {
+                await client.sendMessage(msg.from, '❌ Por favor, responda apenas *SIM* ou *NÃO*.');
+            }
+            break;
+        }
+        
+        
+        
+        
+        // FAZER AINDA
+        // case 'aguardandoSaborBorda': {
+        //     const sabores = msg.body.split(',').map(s => s.trim().toUpperCase());
+        //     if (sabores.length > 3) {
+        //         await client.sendMessage(msg.from, '⚠️ A pizza de borda recheada permite até *3 sabores*. Tente novamente.');
+        //     } else {
+        //         dados.comanda.saboresPizza = sabores;
+        //         dados.etapa = 'aguardandoFrete';
+        //         await client.sendMessage(msg.from, '📍 Agora, informe a *sua região* para calcularmos o frete.');
+        //     }
+        //     break;
+        // }
+        
+        
         case 'aguardandoSaborAcai': {
             const sabor = msg.body.trim();
             dados.comanda.saborAcai = sabor;
@@ -203,25 +419,41 @@ client.on('message', async msg => {
             dados.comanda.localidade = localidade;
             dados.comanda.valorFrete = precosFrete[localidade.toLowerCase()] || 0;
         
+            dados.etapa = 'aguardandoEndereco';
+        
             await chat.sendStateTyping();
             await client.sendMessage(msg.from,
                 '📌 Perfeito. Poderia me enviar a *localização atual* e me informar o *endereço direitinho* por favor?'
             );
         
-            dados.etapa = 'aguardandoEndereco';
             break;
         }
+        
+
         case 'aguardandoEndereco': {
-            const endereco = msg.body.trim();
+            let endereco = '';
+        
+            if (msg.type === 'location' && msg.location) {
+                const { latitude, longitude } = msg.location;
+                endereco = `Localização acima!`;
+            } else {
+                endereco = msg.body.trim();
+            }
+            
             dados.comanda.enderecoTexto = endereco;
         
-            dados.etapa = 'formaPagamento';
+            // ✅ Adiciona pergunta após salvar o endereço
+            dados.etapa = 'perguntarMaisPizzaOuAcai';
+        
             await chat.sendStateTyping();
             await client.sendMessage(msg.from,
-                '💳 Como prefere pagar?\n\n1️⃣ Cartão (crédito/débito)\n2️⃣ Dinheiro (levar troco para quanto?)\n3️⃣ Pix'
-            );            
+                '❓ Muito bom! Você deseja adicionar outra pizza ou açaí?\n\n*SIM*\n*NÃO*'
+            );
+        
             break;
-        }        
+        }
+          
+
         case 'perguntarOutroAcai': {
             const resposta = msg.body.trim().toLowerCase();
             if (!dados.comanda.listaAcais) dados.comanda.listaAcais = [];
@@ -246,14 +478,23 @@ client.on('message', async msg => {
                 dados.etapa = 'aguardandoFrete';
                 await chat.sendStateTyping();
                 await client.sendMessage(msg.from,
-                    '🚚 Antes de finalizar, escolha sua *localidade* para calcularmos o frete:\n\n' +
-                    '📍 *3 reais:* bom será, licurizal, buraco d’água\n' +
-                    '📍 *5 reais:* lagoa velha, gazai, baixa da ema\n' +
-                    '📍 *7 reais:* batista, ipoeira, pedra azul\n' +
-                    '📍 *10 reais:* pindura saia, roma\n' +
-                    '📍 *12 reais:* araticum\n' +
-                    '📍 *15 reais:* quatro estradas, ponto, cabeça do boi\n\n' +
-                    '✏️ Digite o nome da sua localidade abaixo ⬇️'
+                    '📍 *Maravilha!* Me informa qual o nome da sua região para calcular o frete:\n\n' +
+                    '- Bom Será\n' +
+                    '- Licurizal\n' +
+                    '- Buraco d´Agua\n' +
+                    '- Lagoa Velha\n' +
+                    '- Gazai\n' +
+                    '- Baixa da Ema\n' +
+                    '- Batista\n' +
+                    '- Ipoeira\n' +
+                    '- Pindura Saia\n' +
+                    '- Roma\n' +
+                    '- Araticum\n' +
+                    '- Quatro Estradas\n' +
+                    '- Cabeça do Boi\n' +
+                    '- Ponto\n\n' +
+                    '✏️ *-Prefiro fazer retirada?*' +
+                    '✏️ *-Outra Região?Qual?:*'
                 );
             }
             break;
@@ -333,51 +574,86 @@ client.on('message', async msg => {
             const hora = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         
             let resumo = `⭐ *RESUMO DE PEDIDO* ⭐\n\n`;
-            resumo += `*Nome:* ${dados.nome}\n\n`;
-            resumo += `*Pedido:*\n`;
+            resumo += `*Nome:* ${dados.nome}\n\n\n`;
+            resumo += `*Pedido:*\n\n`;
+        
+            // Agora está seguro usar +=
+            if (dados.comanda.saboresPizza) {
+                resumo += `🍕 *Pizza* (${dados.comanda.tamanhoPizza}) - Sabores: ${dados.comanda.saboresPizza.join(', ')}\n`;
+            }
+            if (dados.comanda.observacao) {
+                resumo += `📝 *Obs:* ${dados.comanda.observacao}\n`;
+            }
+            if (dados.comanda.bebida) {
+                resumo += `🥤 *Bebida:* ${dados.comanda.bebida}\n`;
+            }
         
             let totalExtras = 0;
-            dados.comanda.listaAcais.forEach((item, i) => {
-                resumo += `${i + 1}. AÇAÍ - ${item.sabor}\n   ➕ Adicionais: ${item.adicionais.join(', ')}\n`;
-                totalExtras += item.valorExtras;
-                if (item.valorExtras > 0) {
-                    resumo += `   💰 Adicionais pagos: R$ ${item.valorExtras.toFixed(2)}\n`;
-                }
-            });
+            if (dados.comanda.listaAcais) {
+                dados.comanda.listaAcais.forEach((item, i) => {
+                    resumo += `${i + 1}. AÇAÍ - ${item.sabor}\n`;
+                    resumo += `   ➕ Adicionais: ${item.adicionais.join(', ')}\n`;
+                    totalExtras += item.valorExtras;
+                    if (item.valorExtras > 0) {
+                        resumo += `   💰 Adicionais pagos: R$ ${item.valorExtras.toFixed(2)}\n`;
+                    }
+                    resumo += `\n`;
+                });
+            }
         
             const frete = dados.comanda.valorFrete || 0;
             const taxa = dados.comanda.taxaCartao || 0;
-            const valorAcais = dados.comanda.listaAcais.length * VALOR_ACAI;
+            const valorAcais = (dados.comanda.listaAcais?.length || 0) * VALOR_ACAI;
             const total = valorAcais + totalExtras + frete + taxa;
         
-            resumo += `${dados.comanda.listaAcais.length + 1}. FRETE R$ ${frete.toFixed(2)}\n`;
-            resumo += `---------------------------\n\n`;
-        
-            resumo += `*Valor Total a pagar:* R$ ${total.toFixed(2)}\n`;
-            resumo += `====================\n\n`;
-        
-            resumo += `🛵 *Com Entrega*\n`;
+            resumo += `📦 FRETE: R$ ${frete.toFixed(2)}\n\n`;
+            resumo += `-----------------------------\n\n`;
+            resumo += `💰 *Valor Total a pagar:* R$ ${total.toFixed(2)}\n\n`;
+            resumo += `===============================\n\n`;
+            resumo += `🛵 *Com Entrega*\n\n`;
             resumo += `===== *Endereço* =====\n`;
-            resumo += `${dados.comanda.localidade}, ${dados.comanda.enderecoTexto}\n`;
-            resumo += `====================\n\n`;
-        
+            resumo += `${dados.comanda.localidade}, ${dados.comanda.enderecoTexto}\n\n`;
+            resumo += `===============================\n\n`;
             resumo += `💳 *Forma de Pagamento:* ${dados.comanda.pagamento || 'Não informado'}\n`;
+        
             if (dados.comanda.pagamento?.toLowerCase().includes('troco')) {
                 const match = dados.comanda.pagamento.match(/R\$\s?\d+(?:,\d{2})?/);
                 if (match) resumo += `💲 *Levar Troco Pra:* ${match[0]}\n`;
             }
         
-            resumo += `\n---------------------------\n`;
+            resumo += `\n-----------------------------\n\n`;
             resumo += `*Pedido realizado em:*\n${dia} | ${hora}\n\n`;
-            resumo += `😊 *Agradecemos a Preferência!!*`;
+            resumo += `😊 *Agradecemos a Preferência!!*\n\n`;
         
             await chat.sendStateTyping();
             await client.sendMessage(msg.from, resumo);
-            delete aguardandoSenha[msg.from];
+            await client.sendMessage(msg.from, '✅ *Me confirma se está tudo certo por favor?*');
+            dados.etapa = 'aguardandoConfirmacao';
             break;
         }
         
+
+        case 'aguardandoConfirmacao': {
+            const resposta = msg.body.trim().toLowerCase();
         
+            // Se a pessoa confirmou
+            if (resposta.includes('sim') || resposta.includes('certo')) {
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from, '🙏 Muito obrigado pela preferência!');
         
+                // Aguarda 1h30 e envia nova mensagem
+                setTimeout(async () => {
+                    await client.sendMessage(msg.from, '👋 Oii, olha eu novamente!\nTudo certinho com seu pedido e a entrega?');
+                }, 90 * 60 * 1000); // 90 minutos
+        
+                delete aguardandoSenha[msg.from];
+            } else {
+                // Se não confirmou
+                await chat.sendStateTyping();
+                await client.sendMessage(msg.from, `😥 Peço-lhe perdão *${dados.nome}*! Estarei passando para um atendente.`);
+                delete aguardandoSenha[msg.from];
+            }
+            break;
+        }        
     }
 });
